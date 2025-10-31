@@ -1,15 +1,41 @@
 # memoria_vllm
 
-Production-ready vLLM inference service with OpenAI-compatible API for embeddings and text generation.
+**Run multiple vLLM models concurrently on a single GPU** - Production-ready inference service with OpenAI-compatible API for embeddings and text generation.
+
+## 🎯 Key Innovation
+
+**vLLM's native limitation**: Cannot run multiple models simultaneously on the same GPU - you can only serve one model per vLLM instance.
+
+**Our solution**: Docker-based architecture that enables **concurrent multi-model inference** on a single GPU by:
+- Running separate vLLM instances in isolated containers (one for embeddings, one for generation)
+- Precise GPU memory management to partition resources between models
+- FastAPI router that seamlessly orchestrates requests to the appropriate backend
+
+**Result**: Serve both embedding and generation models simultaneously without needing multiple GPUs or complex model swapping.
 
 ## Features
 
+- 🎯 **Multi-Model Single GPU** - Run embedding + generation models concurrently on one GPU (vLLM's native limitation solved)
 - 🚀 **OpenAI-Compatible API** - Drop-in replacement for OpenAI embeddings and completions endpoints
-- ⚡ **vLLM V1 Engine** - Latest version with 1.7x speedup and optimized performance
-- 🐳 **Docker Compose** - Easy deployment with isolated embedding and generation instances
-- 🔧 **GPU Memory Management** - Configurable memory allocation per model
-- 📊 **Health Monitoring** - Built-in health checks for all services
-- ✅ **Fully Tested** - 64 tests covering unit, integration, compliance, and load scenarios
+- 🐳 **Docker Isolation** - Each model runs in its own vLLM instance with dedicated GPU memory allocation
+- 🔧 **Smart Memory Management** - Configurable memory partitioning prevents OOM errors (e.g., 30% embed + 60% gen)
+- 📊 **Health Monitoring** - Built-in health checks for all services with aggregated status
+- ✅ **Fully Tested** - 65 tests covering unit, integration, compliance, and concurrent load scenarios
+
+---
+
+## Why This Matters
+
+### Traditional Approaches vs. memoria_vllm
+
+| Approach | Cost | Latency | Complexity | Concurrent Models |
+|----------|------|---------|------------|-------------------|
+| **Multiple GPUs** | $$$$$ (2x GPU cost) | Low | Medium | ✅ Yes |
+| **Model Swapping** | $ | High (reload time) | Medium | ❌ Sequential only |
+| **Multiple Servers** | $$$$ | Low | High | ✅ Yes |
+| **memoria_vllm** | $ (1 GPU) | **Low** | **Low** | **✅ Yes** |
+
+**memoria_vllm gives you the performance of multi-GPU setups at single-GPU cost.**
 
 ---
 
@@ -275,31 +301,60 @@ async function getCompletion(prompt: string): Promise<string> {
 
 ## Architecture
 
+### How We Solve vLLM's Single-Model Limitation
+
+**The Problem**: vLLM can only serve one model per instance. To run multiple models, you traditionally need:
+- Multiple GPUs (expensive)
+- Model swapping (slow, high latency)
+- Multiple servers (complex infrastructure)
+
+**Our Solution**: Docker containerization + GPU memory partitioning
+
 ```
 ┌─────────────────────────────────────────────────┐
 │              Client Application                  │
 └────────────────────┬────────────────────────────┘
-                     │ HTTP
+                     │ HTTP (OpenAI-compatible)
                      ▼
          ┌───────────────────────┐
-         │   FastAPI Router      │
+         │   FastAPI Router      │  ← Intelligent request routing
          │   (Port 8200)         │
          └─────────┬─────────────┘
                    │
          ┌─────────┴──────────┐
          ▼                    ▼
 ┌────────────────┐   ┌────────────────┐
-│ vLLM Embedding │   │ vLLM Generation│
+│ vLLM Embedding │   │ vLLM Generation│  ← Separate Docker containers
 │  (Port 8100)   │   │  (Port 8101)   │
 │                │   │                │
-│ GPU Memory 30% │   │ GPU Memory 60% │
-└────────────────┘   └────────────────┘
+│ GPU Memory 30% │   │ GPU Memory 60% │  ← GPU memory partitioning
+└────────┬───────┘   └───────┬────────┘
+         │                   │
+         └─────────┬─────────┘
+                   ▼
+         ┌──────────────────┐
+         │   Single GPU     │  ← Both models share one GPU
+         │   (e.g., RTX 4090)│
+         └──────────────────┘
 ```
+
+**How It Works:**
+1. **Docker Isolation**: Each model runs in its own vLLM container with `--gpus all` access
+2. **Memory Partitioning**: `--gpu-memory-utilization` flag allocates specific GPU memory fraction to each instance
+3. **Concurrent Execution**: Both containers access the same GPU simultaneously via Docker's GPU sharing
+4. **Smart Routing**: FastAPI router directs embedding requests → Port 8100, completion requests → Port 8101
+
+**Benefits:**
+- ✅ **Single GPU**: No need for multiple GPUs (save $1000s)
+- ✅ **Zero Latency**: No model swapping overhead
+- ✅ **Production Ready**: Both models ready to serve 24/7
+- ✅ **Resource Efficient**: Precise memory control prevents OOM errors
+- ✅ **Scalable**: Add more models by adjusting memory fractions
 
 **Components:**
 - **Router Service**: FastAPI gateway for request routing and health aggregation
-- **Embedding Instance**: Dedicated vLLM instance for embedding generation
-- **Generation Instance**: Dedicated vLLM instance for text completion
+- **Embedding Instance**: Dedicated vLLM container serving embedding model (30% GPU)
+- **Generation Instance**: Dedicated vLLM container serving generation model (60% GPU)
 
 ---
 
