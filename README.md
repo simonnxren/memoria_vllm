@@ -118,12 +118,27 @@ client = OpenAI(
     api_key="not-needed"  # API key not required
 )
 
-# Generate embeddings
+# Generate embeddings (single text)
 response = client.embeddings.create(
     input="Your text here",
     model="Qwen/Qwen3-Embedding-0.6B"
 )
 embedding = response.data[0].embedding  # List of 1024 floats
+
+# Generate embeddings (batch processing)
+texts = [
+    "The quick brown fox jumps over the lazy dog",
+    "Machine learning is transforming technology",
+    "Python is a versatile programming language"
+]
+response = client.embeddings.create(
+    input=texts,  # Pass list of strings
+    model="Qwen/Qwen3-Embedding-0.6B"
+)
+# Access individual embeddings
+for i, item in enumerate(response.data):
+    embedding = item.embedding  # List of 1024 floats
+    print(f"Text {i}: {len(embedding)} dimensions")
 
 # Generate completions
 response = client.completions.create(
@@ -142,7 +157,7 @@ import httpx
 
 BASE_URL = "http://localhost:8200/v1"
 
-# Embeddings
+# Embeddings (single text)
 response = httpx.post(
     f"{BASE_URL}/embeddings",
     json={
@@ -152,6 +167,24 @@ response = httpx.post(
 )
 data = response.json()
 embedding = data["data"][0]["embedding"]
+
+# Embeddings (batch processing)
+response = httpx.post(
+    f"{BASE_URL}/embeddings",
+    json={
+        "input": [
+            "First text to embed",
+            "Second text to embed",
+            "Third text to embed"
+        ],
+        "model": "Qwen/Qwen3-Embedding-0.6B"
+    }
+)
+data = response.json()
+# Access individual embeddings
+for i, item in enumerate(data["data"]):
+    embedding = item["embedding"]
+    print(f"Embedding {i}: {len(embedding)} dimensions")
 
 # Completions
 response = httpx.post(
@@ -169,11 +202,23 @@ text = data["choices"][0]["text"]
 ### cURL Examples
 
 ```bash
-# Embeddings
+# Embeddings (single text)
 curl -X POST http://localhost:8200/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{
     "input": "Hello world",
+    "model": "Qwen/Qwen3-Embedding-0.6B"
+  }'
+
+# Embeddings (batch processing)
+curl -X POST http://localhost:8200/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": [
+      "First text to embed",
+      "Second text to embed",
+      "Third text to embed"
+    ],
     "model": "Qwen/Qwen3-Embedding-0.6B"
   }'
 
@@ -194,6 +239,8 @@ curl http://localhost:8200/health
 
 ```typescript
 // Using fetch API
+
+// Single text embedding
 async function getEmbedding(text: string): Promise<number[]> {
   const response = await fetch('http://localhost:8200/v1/embeddings', {
     method: 'POST',
@@ -208,7 +255,22 @@ async function getEmbedding(text: string): Promise<number[]> {
   return data.data[0].embedding;
 }
 
-async function getCompletion(prompt: string): Promise<string> {
+// Batch embeddings
+async function getBatchEmbeddings(texts: string[]): Promise<number[][]> {
+  const response = await fetch('http://localhost:8200/v1/embeddings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      input: texts,  // Array of strings
+      model: 'Qwen/Qwen3-Embedding-0.6B'
+    })
+  });
+  
+  const data = await response.json();
+  return data.data.map((item: any) => item.embedding);
+}
+
+// Text completion
   const response = await fetch('http://localhost:8200/v1/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -233,9 +295,29 @@ async function getCompletion(prompt: string): Promise<string> {
 **Request:**
 ```json
 {
-  "input": "string or array of strings",
+  "input": "string or array of strings",  // Single text or batch
   "model": "model_identifier",
   "encoding_format": "float"  // optional
+}
+```
+
+**Single Text Example:**
+```json
+{
+  "input": "Hello world",
+  "model": "Qwen/Qwen3-Embedding-0.6B"
+}
+```
+
+**Batch Example:**
+```json
+{
+  "input": [
+    "First text to embed",
+    "Second text to embed",
+    "Third text to embed"
+  ],
+  "model": "Qwen/Qwen3-Embedding-0.6B"
 }
 ```
 
@@ -249,6 +331,7 @@ async function getCompletion(prompt: string): Promise<string> {
       "embedding": [0.1, 0.2, ...],  // 1024-dim vector
       "index": 0
     }
+    // Additional items for batch requests
   ],
   "model": "Qwen/Qwen3-Embedding-0.6B",
   "usage": {
