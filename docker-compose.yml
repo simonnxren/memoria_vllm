@@ -1,0 +1,129 @@
+services:
+  # vLLM Embedding Instance
+  vllm-embedding:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-embedding
+    command: >
+      --model ${MODEL_EMBED_NAME}
+      --task embed
+      --port 8100
+      --host 0.0.0.0
+      --gpu-memory-utilization ${VLLM_EMBED_GPU_MEMORY}
+      --trust-remote-code
+      --disable-log-requests
+      --enable-prefix-caching
+      --max-num-seqs ${VLLM_EMBED_MAX_NUM_SEQS:-256}
+      --max-num-batched-tokens ${VLLM_EMBED_MAX_BATCHED_TOKENS:-8192}
+      --enable-chunked-prefill
+      --dtype auto
+      --enforce-eager
+      --enable-request-id-headers
+      --pooler-config '{"pooling_type":"MEAN","normalize":true,"enable_chunked_processing":true,"max_embed_len":8192}'
+    ports:
+      - "${VLLM_EMBED_PORT}:8100"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_LOGGING_LEVEL=INFO
+      - HF_HOME=/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    networks:
+      - vllm-network
+    restart: unless-stopped
+    shm_size: '2gb'
+
+  # vLLM Generation Instance
+  vllm-generation:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-generation
+    command: >
+      --model ${MODEL_GEN_NAME}
+      --port 8101
+      --host 0.0.0.0
+      --gpu-memory-utilization ${VLLM_GEN_GPU_MEMORY}
+      --trust-remote-code
+      --disable-log-requests
+      --enable-prefix-caching
+      --max-num-seqs ${VLLM_GEN_MAX_NUM_SEQS:-128}
+      --max-num-batched-tokens ${VLLM_GEN_MAX_BATCHED_TOKENS:-16384}
+      --enable-chunked-prefill
+      --max-model-len ${VLLM_GEN_MAX_MODEL_LEN:-8192}
+      --dtype auto
+      --enforce-eager
+      --enable-request-id-headers
+      --enable-force-include-usage
+      --enable-prompt-tokens-details
+      --scheduling-policy ${VLLM_GEN_SCHEDULER_POLICY:-fcfs}
+    ports:
+      - "${VLLM_GEN_PORT}:8101"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_LOGGING_LEVEL=INFO
+      - HF_HOME=/root/.cache/huggingface
+    depends_on:
+      vllm-embedding:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8101/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s  # Increased for V1 initialization
+    networks:
+      - vllm-network
+    restart: unless-stopped
+    shm_size: '4gb'  # Increased for generation workload
+
+  # FastAPI Router
+  router:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.router
+    container_name: vllm-router
+    ports:
+      - "${ROUTER_PORT}:8200"
+    environment:
+      - VLLM_EMBED_URL=${VLLM_EMBED_URL}
+      - VLLM_GEN_URL=${VLLM_GEN_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - LOG_FORMAT=${LOG_FORMAT}
+      - MODEL_EMBED_NAME=${MODEL_EMBED_NAME}
+      - MODEL_GEN_NAME=${MODEL_GEN_NAME}
+    depends_on:
+      vllm-embedding:
+        condition: service_healthy
+      vllm-generation:
+        condition: service_healthy
+    networks:
+      - vllm-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+networks:
+  vllm-network:
+    driver: bridge
